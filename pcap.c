@@ -36,6 +36,35 @@ static void pcap_destructor_pcap(zend_resource *rsrc)
 	pcap_close(ptr);
 }
 
+#ifdef PHP_WIN32
+# define SET_ALIGNED(alignment, decl) __declspec(align(alignment)) decl
+#elif HAVE_ATTRIBUTE_ALIGNED
+# define SET_ALIGNED(alignment, decl) decl __attribute__ ((__aligned__ (alignment)))
+#else
+# define SET_ALIGNED(alignment, decl) decl
+#endif
+
+/* this is read-only, so it's ok */
+SET_ALIGNED(16, static char hexconvtab[]) = "0123456789abcdef";
+
+/* {{{ php_bin2hex
+ */
+static zend_string *pcap_bin2hex(const unsigned char *old, const size_t oldlen)
+{
+	zend_string *result;
+	size_t i, j;
+
+	result = zend_string_safe_alloc(oldlen, 2 * sizeof(char), 0, 0);
+
+	for (i = j = 0; i < oldlen; i++) {
+		ZSTR_VAL(result)[j++] = hexconvtab[old[i] >> 4];
+		ZSTR_VAL(result)[j++] = hexconvtab[old[i] & 15];
+	}
+	ZSTR_VAL(result)[j] = '\0';
+
+	return result;
+}
+
 /* {{{ proto string confirm_pcap_compiled(string arg)
    Return a string to confirm that the module is compiled in */
 PHP_FUNCTION(pcap_open_offline)
@@ -135,6 +164,7 @@ PHP_FUNCTION(pcap_next)
 	const u_char	*p;
 	register const struct ether_header	*eptr;
 	struct pcap_pkthdr	hdr;
+	zend_string *src, *dst;
 
 	if (zend_parse_parameters(ZEND_NUM_ARGS(), "r", &z_fp) == FAILURE) {
 		return;
@@ -147,16 +177,22 @@ PHP_FUNCTION(pcap_next)
 	if (!(p = pcap_next(fp, &hdr))) {
 		RETURN_FALSE;
 	}
+
 	packet = (char *)safe_emalloc(1, hdr.len, 0);
+
 	for (i = 14; i < hdr.len; i++) {
 		packet[(i - 14)] = p[i];
 	}
+
 	eptr = (struct ether_header *)p;
+	/* Convert MAC addresses to hex */
+	src = pcap_bin2hex((char *) eptr->ether_shost, ETHER_ADDR_LEN);
+	dst = pcap_bin2hex((char *) eptr->ether_dhost, ETHER_ADDR_LEN);
 
 	array_init(&eth_val);
 	array_init(return_value);
-	add_assoc_stringl(&eth_val, "src", (char *) eptr->ether_shost, ETHER_ADDR_LEN);
-	add_assoc_stringl(&eth_val, "dst", (char *) eptr->ether_dhost, ETHER_ADDR_LEN);
+	add_assoc_string(&eth_val, "src", ZSTR_VAL(src));
+	add_assoc_string(&eth_val, "dst", ZSTR_VAL(dst));
 	add_assoc_long(&eth_val, "type", eptr->ether_type);
 	add_assoc_zval(return_value, "ethernet", &eth_val);
 	add_assoc_stringl(return_value, "data", packet, (hdr.len - 14));
