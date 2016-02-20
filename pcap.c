@@ -9,6 +9,7 @@
 #include "php_pcap.h"
 
 #include <pcap/pcap.h>
+#include <netinet/if_ether.h>
 
 /* If you declare any globals in php_pcap.h uncomment this:
 ZEND_DECLARE_MODULE_GLOBALS(pcap)
@@ -60,7 +61,7 @@ PHP_FUNCTION(pcap_open_offline)
 
 /* {{{ proto string confirm_pcap_compiled(string arg)
    Return a string to confirm that the module is compiled in */
-PHP_FUNCTION(pcap_compile)
+PHP_FUNCTION(pcap_filter)
 {
 	zval	*z_fp;
 	pcap_t	*fp;
@@ -95,7 +96,7 @@ PHP_FUNCTION(pcap_next_raw)
 {
 	zval		*z_fp;
 	pcap_t		*fp;
-	int		i;
+	int			i;
 	const u_char	*p;
 	struct pcap_pkthdr hdr;
 	char		*packet;
@@ -122,6 +123,47 @@ PHP_FUNCTION(pcap_next_raw)
 
 }
 /* }}} */
+
+/* {{{ proto string confirm_pcap_compiled(string arg)
+   Return a string to confirm that the module is compiled in */
+PHP_FUNCTION(pcap_next)
+{
+	zval	*z_fp, eth_val;
+	pcap_t	*fp;
+	int		i;
+	char	*packet;
+	const u_char	*p;
+	register const struct ether_header	*eptr;
+	struct pcap_pkthdr	hdr;
+
+	if (zend_parse_parameters(ZEND_NUM_ARGS(), "r", &z_fp) == FAILURE) {
+		return;
+	}
+
+	if ((fp = (pcap_t *)zend_fetch_resource(Z_RES_P(z_fp), le_pcap_name, le_pcap)) == NULL) {
+		RETURN_FALSE;
+	}
+
+	if (!(p = pcap_next(fp, &hdr))) {
+		RETURN_FALSE;
+	}
+	packet = (char *)safe_emalloc(1, hdr.len, 0);
+	for (i = 14; i < hdr.len; i++) {
+		packet[(i - 14)] = p[i];
+	}
+	eptr = (struct ether_header *)p;
+
+	array_init(&eth_val);
+	array_init(return_value);
+	add_assoc_stringl(&eth_val, "src", (char *) eptr->ether_shost, ETHER_ADDR_LEN);
+	add_assoc_stringl(&eth_val, "dst", (char *) eptr->ether_dhost, ETHER_ADDR_LEN);
+	add_assoc_long(&eth_val, "type", eptr->ether_type);
+	add_assoc_zval(return_value, "ethernet", &eth_val);
+	add_assoc_stringl(return_value, "data", packet, (hdr.len - 14));
+
+}
+/* }}} */
+
 
 /* {{{ php_pcap_init_globals
  */
@@ -198,8 +240,9 @@ PHP_MINFO_FUNCTION(pcap)
  */
 const zend_function_entry pcap_functions[] = {
 	PHP_FE(pcap_open_offline,	NULL)
-	PHP_FE(pcap_compile,		NULL)
+	PHP_FE(pcap_filter,			NULL)
 	PHP_FE(pcap_next_raw,		NULL)
+	PHP_FE(pcap_next,			NULL)
 	PHP_FE_END	/* Must be the last line in pcap_functions[] */
 };
 /* }}} */
