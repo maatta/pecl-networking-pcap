@@ -10,6 +10,7 @@
 
 #include <pcap/pcap.h>
 #include <netinet/if_ether.h>
+#include <netinet/ip.h>
 
 /* If you declare any globals in php_pcap.h uncomment this:
 ZEND_DECLARE_MODULE_GLOBALS(pcap)
@@ -43,6 +44,7 @@ static void pcap_destructor_pcap(zend_resource *rsrc)
 #else
 # define SET_ALIGNED(alignment, decl) decl
 #endif
+
 
 /* this is read-only, so it's ok */
 SET_ALIGNED(16, static char hexconvtab[]) = "0123456789abcdef";
@@ -80,6 +82,7 @@ PHP_FUNCTION(pcap_open_offline)
 	
 	if (!(fp = pcap_open_offline(file, errbuf))) {
 		/* Error */
+		php_error_docref(NULL, E_WARNING, "Problem opening file: %s", errbuf);
 		RETURN_FALSE;
 	}
 
@@ -119,6 +122,31 @@ PHP_FUNCTION(pcap_filter)
 }
 /* }}} */
 
+
+/* {{{ proto string confirm_pcap_compiled(string arg)
+   Return a string to confirm that the module is compiled in */
+PHP_FUNCTION(pcap_geterr)
+{
+	zval	*z_fp;
+	pcap_t	*fp;
+	zend_string	*err;
+
+	if (zend_parse_parameters(ZEND_NUM_ARGS(), "r", &z_fp) == FAILURE) {
+		return;
+	}
+
+	if ((fp = (pcap_t *)zend_fetch_resource(Z_RES_P(z_fp), le_pcap_name, le_pcap)) == NULL) {
+		RETURN_FALSE;
+	}
+
+	/* XXX: This is wrong */
+	err = (char *) pcap_geterr(fp);
+
+	RETURN_STRING(err);
+}
+/* }}} */
+
+
 /* {{{ proto string confirm_pcap_compiled(string arg)
    Return a string to confirm that the module is compiled in */
 PHP_FUNCTION(pcap_next_raw)
@@ -128,7 +156,6 @@ PHP_FUNCTION(pcap_next_raw)
 	int			i;
 	const u_char	*p;
 	struct pcap_pkthdr hdr;
-	char		*packet;
 
 	if (zend_parse_parameters(ZEND_NUM_ARGS(), "r", &z_fp) == FAILURE) {
 		return;
@@ -142,14 +169,11 @@ PHP_FUNCTION(pcap_next_raw)
 		RETURN_FALSE;
 	}
 
-	packet = (char *)safe_emalloc(1, hdr.len, 0);
-
-	for (i = 0; i < hdr.len; i++) {
-		packet[i] = p[i];
+	if (p < 0) {
+		RETURN_FALSE;
 	}
 
-	RETURN_STRINGL(packet, hdr.len);
-
+	RETURN_STRINGL(p, hdr.len);
 }
 /* }}} */
 
@@ -157,13 +181,14 @@ PHP_FUNCTION(pcap_next_raw)
    Return a string to confirm that the module is compiled in */
 PHP_FUNCTION(pcap_next)
 {
-	zval	*z_fp, eth_val;
+	zval	*z_fp, eth_val, ip_val;
 	pcap_t	*fp;
 	int		i;
-	char	*packet;
+	char	*data;
 	const u_char	*p;
 	register const struct ether_header	*eptr;
 	struct pcap_pkthdr	hdr;
+	struct iphdr		*ip;
 	zend_string *src, *dst;
 
 	if (zend_parse_parameters(ZEND_NUM_ARGS(), "r", &z_fp) == FAILURE) {
@@ -178,11 +203,7 @@ PHP_FUNCTION(pcap_next)
 		RETURN_FALSE;
 	}
 
-	packet = (char *)safe_emalloc(1, hdr.len, 0);
-
-	for (i = 14; i < hdr.len; i++) {
-		packet[(i - 14)] = p[i];
-	}
+	data = (char *)p+14;
 
 	eptr = (struct ether_header *)p;
 	/* Convert MAC addresses to hex */
@@ -193,10 +214,29 @@ PHP_FUNCTION(pcap_next)
 	array_init(return_value);
 	add_assoc_string(&eth_val, "src", ZSTR_VAL(src));
 	add_assoc_string(&eth_val, "dst", ZSTR_VAL(dst));
-	add_assoc_long(&eth_val, "type", eptr->ether_type);
+	add_assoc_long(&eth_val, "type", __builtin_bswap16(eptr->ether_type));
 	add_assoc_zval(return_value, "ethernet", &eth_val);
-	add_assoc_stringl(return_value, "data", packet, (hdr.len - 14));
 
+	if (0x0800 == __builtin_bswap16(eptr->ether_type)) {
+		ip = (struct iphdr *) (p+14);
+		data = (char *)(p+14+ip->ihl);
+		array_init(&ip_val);
+		add_assoc_long(&ip_val, "version", ip->version);
+		add_assoc_long(&ip_val, "hlen", (ip->ihl << 2));
+		add_assoc_long(&ip_val, "tos", ntohl(ip->tos));
+		add_assoc_long(&ip_val, "len", ntohs(ip->tot_len));
+		add_assoc_long(&ip_val, "id", ntohs(ip->id));
+		add_assoc_long(&ip_val, "frag_off", ntohs(ip->frag_off));
+		add_assoc_long(&ip_val, "ttl", (ip->ttl));
+		add_assoc_long(&ip_val, "proto", (ip->protocol));
+		add_assoc_long(&ip_val, "checksum", ntohs(ip->check));
+		add_assoc_long(&ip_val, "saddr", ntohl(ip->saddr));
+		add_assoc_long(&ip_val, "daddr", ntohl(ip->daddr)); 
+		add_assoc_zval(return_value, "ip", &ip_val);
+		add_assoc_stringl(return_value, "data", data, (ntohs(ip->tot_len) - (ip->ihl << 2)));
+	} else {
+		add_assoc_stringl(return_value, "data", data, (hdr.len - 14));
+	}
 }
 /* }}} */
 
@@ -277,6 +317,7 @@ PHP_MINFO_FUNCTION(pcap)
 const zend_function_entry pcap_functions[] = {
 	PHP_FE(pcap_open_offline,	NULL)
 	PHP_FE(pcap_filter,			NULL)
+	PHP_FE(pcap_geterr,			NULL)
 	PHP_FE(pcap_next_raw,		NULL)
 	PHP_FE(pcap_next,			NULL)
 	PHP_FE_END	/* Must be the last line in pcap_functions[] */
