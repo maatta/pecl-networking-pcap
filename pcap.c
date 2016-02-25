@@ -12,6 +12,8 @@
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 
+#define ETHER_HEADER_LEN 14
+
 /* If you declare any globals in php_pcap.h uncomment this:
 ZEND_DECLARE_MODULE_GLOBALS(pcap)
 */
@@ -203,9 +205,10 @@ PHP_FUNCTION(pcap_next)
 		RETURN_FALSE;
 	}
 
-	data = (char *)p+14;
+	data = (char *)p+ETHER_HEADER_LEN;
 
 	eptr = (struct ether_header *)p;
+
 	/* Convert MAC addresses to hex */
 	src = pcap_bin2hex((char *) eptr->ether_shost, ETHER_ADDR_LEN);
 	dst = pcap_bin2hex((char *) eptr->ether_dhost, ETHER_ADDR_LEN);
@@ -218,24 +221,26 @@ PHP_FUNCTION(pcap_next)
 	add_assoc_zval(return_value, "ethernet", &eth_val);
 
 	if (0x0800 == __builtin_bswap16(eptr->ether_type)) {
-		ip = (struct iphdr *) (p+14);
-		data = (char *)(p+14+ip->ihl);
+		ip = (struct iphdr *) (p+ETHER_HEADER_LEN);
+		/* IP data should start at p + ethernet header + IP header length */
+		data = (char *)(p+ETHER_HEADER_LEN+(ip->ihl << 2));
 		array_init(&ip_val);
 		add_assoc_long(&ip_val, "version", ip->version);
 		add_assoc_long(&ip_val, "hlen", (ip->ihl << 2));
-		add_assoc_long(&ip_val, "tos", ntohl(ip->tos));
+		add_assoc_long(&ip_val, "tos", ip->tos);
 		add_assoc_long(&ip_val, "len", ntohs(ip->tot_len));
 		add_assoc_long(&ip_val, "id", ntohs(ip->id));
 		add_assoc_long(&ip_val, "frag_off", ntohs(ip->frag_off));
-		add_assoc_long(&ip_val, "ttl", (ip->ttl));
-		add_assoc_long(&ip_val, "proto", (ip->protocol));
+		add_assoc_long(&ip_val, "ttl", ip->ttl);
+		add_assoc_long(&ip_val, "proto", ip->protocol);
 		add_assoc_long(&ip_val, "checksum", ntohs(ip->check));
 		add_assoc_long(&ip_val, "saddr", ntohl(ip->saddr));
 		add_assoc_long(&ip_val, "daddr", ntohl(ip->daddr)); 
 		add_assoc_zval(return_value, "ip", &ip_val);
+		/* Data length is total length - IP header */
 		add_assoc_stringl(return_value, "data", data, (ntohs(ip->tot_len) - (ip->ihl << 2)));
 	} else {
-		add_assoc_stringl(return_value, "data", data, (hdr.len - 14));
+		add_assoc_stringl(return_value, "data", data, (hdr.len - ETHER_HEADER_LEN));
 	}
 }
 /* }}} */
