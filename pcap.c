@@ -277,6 +277,20 @@ PHP_FUNCTION(pcap_next)
 			add_assoc_zval(return_value, "udp", &proto_val);
 			data = (char *) (p+ETHER_HEADER_LEN+(ip->ihl << 2)+ntohs(udp->len));
 			add_assoc_stringl(return_value, "data", data, (ntohs(udp->len) - 8));
+		/*   1 ICMP
+		 *   2 IGMP
+		 *  41 IPv6
+		 *  43 IPv6 Route
+		 *  44 IPv6 Fragment
+		 *  47 GRE
+		 *  51 AH
+		 *  88 EIGRP
+		 *  89 OSPF
+		 * 112 VRRP
+		 * 115 L2TPv3
+		 * 124 ISIS over IPv4
+		 * 137 MPLS-in-IP
+		 */
 		} else {
 			/* Catch-all, add as IP data */
 			data = (char *)(p+ETHER_HEADER_LEN+(ip->ihl << 2));
