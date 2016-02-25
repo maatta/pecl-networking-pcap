@@ -209,7 +209,7 @@ PHP_FUNCTION(pcap_next)
 		RETURN_FALSE;
 	}
 
-	data = (char *)p+ETHER_HEADER_LEN;
+	data = (char *) (p+ETHER_HEADER_LEN);
 
 	eptr = (struct ether_header *)p;
 
@@ -243,13 +243,13 @@ PHP_FUNCTION(pcap_next)
 
 		if (6 == ip->protocol) {
 			/* TCP */
-			tcp = (struct tcphdr *)(p + ETHER_HEADER_LEN + (ip->ihl << 2));
+			tcp = (struct tcphdr *) (p+ETHER_HEADER_LEN+(ip->ihl << 2));
 			array_init(&proto_val);
 			add_assoc_long(&proto_val, "sport", ntohs(tcp->th_sport));
 			add_assoc_long(&proto_val, "dport", ntohs(tcp->th_dport));
 			add_assoc_long(&proto_val, "seq", ntohl(tcp->th_seq));
 			add_assoc_long(&proto_val, "ack", ntohl(tcp->th_ack));
-			add_assoc_long(&proto_val, "x2", (tcp->th_x2 << 2));
+			add_assoc_long(&proto_val, "res", (tcp->th_x2 << 2));
 			add_assoc_long(&proto_val, "offset", tcp->th_off);
 			add_assoc_long(&proto_val, "flags", ntohs(tcp->th_flags));
 			add_assoc_long(&proto_val, "window", ntohs(tcp->th_win));
@@ -258,9 +258,9 @@ PHP_FUNCTION(pcap_next)
 			add_assoc_zval(return_value, "tcp", &proto_val);
 
 			/* XXX: Options not handled! */
-			if ((ntohs(ip->tot_len) - (ip->ihl << 2) - 20) > 0) {
-				data = (char *)(p + ETHER_HEADER_LEN + (ip->ihl << 2) + 20);
-				add_assoc_stringl(return_value, "data", data, (ntohs(ip->tot_len) - (ip->ihl << 2) - 20));
+			if ((ntohs(ip->tot_len) - (ip->ihl << 2) - (tcp->th_off * 4)) > 0) {
+				data = (char *) (p+ETHER_HEADER_LEN+(ip->ihl << 2)+(tcp->th_off * 4));
+				add_assoc_stringl(return_value, "data", data, (ntohs(ip->tot_len)-(ip->ihl << 2)-(tcp->th_off * 4)));
 			} else {
 				/* Set data to false if we have no data */
 				add_assoc_bool(return_value, "data", 0);
@@ -275,13 +275,13 @@ PHP_FUNCTION(pcap_next)
 			add_assoc_long(&proto_val, "len", ntohs(udp->len));
 			add_assoc_long(&proto_val, "checksum", ntohs(udp->check));
 			add_assoc_zval(return_value, "udp", &proto_val);
-			data = (char *)(p + ETHER_HEADER_LEN + (ip->ihl << 2) + ntohs(udp->len));
+			data = (char *) (p+ETHER_HEADER_LEN+(ip->ihl << 2)+ntohs(udp->len));
 			add_assoc_stringl(return_value, "data", data, (ntohs(udp->len) - 8));
 		} else {
 			/* Catch-all, add as IP data */
 			data = (char *)(p+ETHER_HEADER_LEN+(ip->ihl << 2));
 			/* Data length is total length - IP header */
-			add_assoc_stringl(return_value, "data", data, (ntohs(ip->tot_len) - (ip->ihl << 2)));
+			add_assoc_stringl(return_value, "data", data, (ntohs(ip->tot_len)-(ip->ihl << 2)));
 		}
 	} else {
 		add_assoc_stringl(return_value, "data", data, (hdr.len - ETHER_HEADER_LEN));
