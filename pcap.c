@@ -181,6 +181,83 @@ PHP_FUNCTION(pcap_next_raw)
 }
 /* }}} */
 
+inline void pcap_ipv4_tcp(zval *ret, struct iphdr *ip, const u_char *p)
+{
+	zval	proto_val;
+	char	*data;
+	struct tcphdr	*tcp;
+
+	tcp = (struct tcphdr *) (p+ETHER_HEADER_LEN+(ip->ihl << 2));
+	array_init(&proto_val);
+	add_assoc_long(&proto_val, "sport", ntohs(tcp->th_sport));
+	add_assoc_long(&proto_val, "dport", ntohs(tcp->th_dport));
+	add_assoc_long(&proto_val, "seq", ntohl(tcp->th_seq));
+	add_assoc_long(&proto_val, "ack", ntohl(tcp->th_ack));
+	add_assoc_long(&proto_val, "res", (tcp->th_x2 << 2));
+	add_assoc_long(&proto_val, "offset", tcp->th_off);
+	add_assoc_long(&proto_val, "flags", ntohs(tcp->th_flags));
+	add_assoc_long(&proto_val, "window", ntohs(tcp->th_win));
+	add_assoc_long(&proto_val, "checksum", ntohs(tcp->th_sum));
+	add_assoc_long(&proto_val, "urgent", ntohs(tcp->th_urp));
+	add_assoc_zval(ret, "tcp", &proto_val);
+
+	/* XXX: Options not handled! */
+	if ((ntohs(ip->tot_len) - (ip->ihl << 2) - (tcp->th_off * 4)) > 0) {
+		data = (char *) (p+ETHER_HEADER_LEN+(ip->ihl << 2)+(tcp->th_off * 4));
+		add_assoc_stringl(ret, "data", data, (ntohs(ip->tot_len)-(ip->ihl << 2)-(tcp->th_off * 4)));
+	} else {
+		/* Set data to false if we have no data */
+		add_assoc_bool(ret, "data", 0);
+	}
+
+}
+
+
+inline void pcap_ipv4_udp(zval *ret, struct iphdr *ip, const u_char *p)
+{
+	zval	proto_val;
+	char	*data;
+	struct udphdr	*udp;
+
+	udp = (struct udphdr *) (p+ETHER_HEADER_LEN+(ip->ihl << 2));
+	array_init(&proto_val);
+	add_assoc_long(&proto_val, "sport", ntohs(udp->source));
+	add_assoc_long(&proto_val, "dport", ntohs(udp->dest));
+	add_assoc_long(&proto_val, "len", ntohs(udp->len));
+	add_assoc_long(&proto_val, "checksum", ntohs(udp->check));
+	add_assoc_zval(ret, "udp", &proto_val);
+	data = (char *) (p+ETHER_HEADER_LEN+(ip->ihl << 2)+ntohs(udp->len));
+	add_assoc_stringl(ret, "data", data, (ntohs(udp->len) - 8));
+}
+
+
+inline void pcap_ipv4_vrrp(zval *ret, struct iphdr *ip, const u_char *p)
+{
+	zval	proto_val;
+	char	*data;
+	struct	vrrp2hdr	*hdr;
+
+	hdr = (struct vrrp2hdr *) (p+ETHER_HEADER_LEN+(ip->ihl << 2));
+
+	if (2 == hdr->version) {
+		/* We could parse all IPs and auth data and add to an array maybe ? */
+		array_init(&proto_val);
+		add_assoc_long(&proto_val, "version", hdr->version);
+		add_assoc_long(&proto_val, "type", hdr->type);
+		add_assoc_long(&proto_val, "rtrid", hdr->rtr_id);
+		add_assoc_long(&proto_val, "prio", hdr->priority);
+		add_assoc_long(&proto_val, "count", hdr->count);
+		add_assoc_long(&proto_val, "auth", hdr->auth);
+		add_assoc_long(&proto_val, "advert", hdr->advert);
+		add_assoc_long(&proto_val, "checksum", ntohs(hdr->checksum));
+		add_assoc_zval(ret, "vrrp", &proto_val);
+		data = (char *) (p+ETHER_HEADER_LEN+(ip->ihl << 2)+8);
+		add_assoc_stringl(ret, "data", data, (ntohs(ip->tot_len) - (ip->ihl << 2) - 8));
+	} else {
+		/* Not version 2 */
+	}
+}
+
 /* {{{ proto string confirm_pcap_compiled(string arg)
    Return a string to confirm that the module is compiled in */
 PHP_FUNCTION(pcap_next)
@@ -225,8 +302,9 @@ PHP_FUNCTION(pcap_next)
 	add_assoc_zval(return_value, "ethernet", &eth_val);
 
 	if (0x0800 == __builtin_bswap16(eptr->ether_type)) {
+		/* IPv4 */
 		ip = (struct iphdr *) (p+ETHER_HEADER_LEN);
-		/* IP data should start at p + ethernet header + IP header length */
+
 		array_init(&ip_val);
 		add_assoc_long(&ip_val, "version", ip->version);
 		add_assoc_long(&ip_val, "hlen", (ip->ihl << 2));
@@ -241,42 +319,21 @@ PHP_FUNCTION(pcap_next)
 		add_assoc_long(&ip_val, "daddr", ntohl(ip->daddr)); 
 		add_assoc_zval(return_value, "ip", &ip_val);
 
-		if (6 == ip->protocol) {
-			/* TCP */
-			tcp = (struct tcphdr *) (p+ETHER_HEADER_LEN+(ip->ihl << 2));
-			array_init(&proto_val);
-			add_assoc_long(&proto_val, "sport", ntohs(tcp->th_sport));
-			add_assoc_long(&proto_val, "dport", ntohs(tcp->th_dport));
-			add_assoc_long(&proto_val, "seq", ntohl(tcp->th_seq));
-			add_assoc_long(&proto_val, "ack", ntohl(tcp->th_ack));
-			add_assoc_long(&proto_val, "res", (tcp->th_x2 << 2));
-			add_assoc_long(&proto_val, "offset", tcp->th_off);
-			add_assoc_long(&proto_val, "flags", ntohs(tcp->th_flags));
-			add_assoc_long(&proto_val, "window", ntohs(tcp->th_win));
-			add_assoc_long(&proto_val, "checksum", ntohs(tcp->th_sum));
-			add_assoc_long(&proto_val, "urgent", ntohs(tcp->th_urp));
-			add_assoc_zval(return_value, "tcp", &proto_val);
-
-			/* XXX: Options not handled! */
-			if ((ntohs(ip->tot_len) - (ip->ihl << 2) - (tcp->th_off * 4)) > 0) {
-				data = (char *) (p+ETHER_HEADER_LEN+(ip->ihl << 2)+(tcp->th_off * 4));
-				add_assoc_stringl(return_value, "data", data, (ntohs(ip->tot_len)-(ip->ihl << 2)-(tcp->th_off * 4)));
-			} else {
-				/* Set data to false if we have no data */
-				add_assoc_bool(return_value, "data", 0);
-			}
-
-		} else if (17 == ip->protocol) {
-			/* UDP */
-			udp = (struct udphdr *)(p + ETHER_HEADER_LEN + (ip->ihl << 2));
-			array_init(&proto_val);
-			add_assoc_long(&proto_val, "sport", ntohs(udp->source));
-			add_assoc_long(&proto_val, "dport", ntohs(udp->dest));
-			add_assoc_long(&proto_val, "len", ntohs(udp->len));
-			add_assoc_long(&proto_val, "checksum", ntohs(udp->check));
-			add_assoc_zval(return_value, "udp", &proto_val);
-			data = (char *) (p+ETHER_HEADER_LEN+(ip->ihl << 2)+ntohs(udp->len));
-			add_assoc_stringl(return_value, "data", data, (ntohs(udp->len) - 8));
+		switch (ip->protocol) {
+			case 6:		/* TCP */
+				pcap_ipv4_tcp(return_value, ip, p);
+				break;
+			case 17:	/* UDP */
+				pcap_ipv4_udp(return_value, ip, p);
+				break;
+			case 112:	/* VRRP */
+				pcap_ipv4_vrrp(return_value, ip, p);
+				break;
+			default:
+				data = (char *)(p+ETHER_HEADER_LEN+(ip->ihl << 2));
+				add_assoc_stringl(return_value, "data", data, (ntohs(ip->tot_len)-(ip->ihl << 2)));
+				break;
+		}
 		/*   1 ICMP
 		 *   2 IGMP
 		 *  41 IPv6
@@ -286,17 +343,12 @@ PHP_FUNCTION(pcap_next)
 		 *  51 AH
 		 *  88 EIGRP
 		 *  89 OSPF
-		 * 112 VRRP
 		 * 115 L2TPv3
 		 * 124 ISIS over IPv4
 		 * 137 MPLS-in-IP
 		 */
-		} else {
-			/* Catch-all, add as IP data */
-			data = (char *)(p+ETHER_HEADER_LEN+(ip->ihl << 2));
-			/* Data length is total length - IP header */
-			add_assoc_stringl(return_value, "data", data, (ntohs(ip->tot_len)-(ip->ihl << 2)));
-		}
+/*	} else if (0x86dd == __builtin_bswap16(eptr->ether_type)) { */
+		/* IPv6 */
 	} else {
 		add_assoc_stringl(return_value, "data", data, (hdr.len - ETHER_HEADER_LEN));
 	}
