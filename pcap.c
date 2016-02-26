@@ -226,18 +226,18 @@ inline void pcap_ipv4_udp(zval *ret, struct iphdr *ip, const u_char *p)
 	add_assoc_long(&proto_val, "len", ntohs(udp->len));
 	add_assoc_long(&proto_val, "checksum", ntohs(udp->check));
 	add_assoc_zval(ret, "udp", &proto_val);
-	data = (char *) (p+ETHER_HEADER_LEN+(ip->ihl << 2)+ntohs(udp->len));
+	data = (char *) (p+ETHER_HEADER_LEN+(ip->ihl << 2)+8);
 	add_assoc_stringl(ret, "data", data, (ntohs(udp->len) - 8));
 }
 
 
-inline void pcap_ipv4_vrrp(zval *ret, struct iphdr *ip, const u_char *p)
+inline void pcap_ipv4_vrrp(zval *ret, struct iphdr *ip, const u_char *p, int *extra_hdrlen)
 {
 	zval	proto_val;
 	char	*data;
 	struct	vrrp2hdr	*hdr;
 
-	hdr = (struct vrrp2hdr *) (p+ETHER_HEADER_LEN+(ip->ihl << 2));
+	hdr = (struct vrrp2hdr *) (p+ETHER_HEADER_LEN+(ip->ihl << 2)+*extra_hdrlen);
 
 	if (2 == hdr->version) {
 		/* We could parse all IPs and auth data and add to an array maybe ? */
@@ -251,12 +251,39 @@ inline void pcap_ipv4_vrrp(zval *ret, struct iphdr *ip, const u_char *p)
 		add_assoc_long(&proto_val, "advert", hdr->advert);
 		add_assoc_long(&proto_val, "checksum", ntohs(hdr->checksum));
 		add_assoc_zval(ret, "vrrp", &proto_val);
-		data = (char *) (p+ETHER_HEADER_LEN+(ip->ihl << 2)+8);
-		add_assoc_stringl(ret, "data", data, (ntohs(ip->tot_len) - (ip->ihl << 2) - 8));
+		data = (char *) (p+ETHER_HEADER_LEN+(ip->ihl << 2)+*extra_hdrlen+8);
+		add_assoc_stringl(ret, "data", data, (ntohs(ip->tot_len) - (ip->ihl << 2) - *extra_hdrlen - 8));
 	} else {
 		/* Not version 2 */
 	}
 }
+
+
+inline void pcap_ipv4_ah(zval *ret, struct iphdr *ip, const u_char *p, int *extra_hdrlen, int *nproto)
+{
+	zval	proto_val;
+	char	*data;
+	int	pl_size;
+	struct ahhdr	*ah;
+
+	ah = (struct ahhdr *) (p+ETHER_HEADER_LEN+(ip->ihl << 2)+*extra_hdrlen);
+
+	/* Payload size */
+	pl_size = ((ah->len - 2)*12)-sizeof(struct ahhdr);
+	*nproto = ah->next;
+	data = (char *) (p+ETHER_HEADER_LEN+(ip->ihl << 2)+*extra_hdrlen+sizeof(struct ahhdr));
+	*extra_hdrlen = *extra_hdrlen+((ah->len - 2)*12);
+
+	array_init(&proto_val);
+	add_assoc_long(&proto_val, "next", ah->next);
+	add_assoc_long(&proto_val, "len", ah->len);
+	add_assoc_long(&proto_val, "rsvd", ntohs(ah->rsvd));
+	add_assoc_long(&proto_val, "spi", ntohl(ah->spi));
+	add_assoc_long(&proto_val, "seq", ntohl(ah->seq));
+	add_assoc_stringl(&proto_val, "icv", data, pl_size);
+	add_assoc_zval(ret, "ah", &proto_val);
+}
+
 
 /* {{{ proto string confirm_pcap_compiled(string arg)
    Return a string to confirm that the module is compiled in */
@@ -264,17 +291,17 @@ PHP_FUNCTION(pcap_next)
 {
 	zval	*z_fp, eth_val, ip_val, proto_val;
 	pcap_t	*fp;
-	int		i;
+	int		i, nproto;
+	int		extra_hdrlen = 0;
+	int		raw = 0;
 	char	*data;
 	const u_char	*p;
 	register const struct ether_header	*eptr;
 	struct pcap_pkthdr	hdr;
 	struct iphdr		*ip;
-	struct tcphdr		*tcp;
-	struct udphdr		*udp;
 	zend_string *src, *dst;
 
-	if (zend_parse_parameters(ZEND_NUM_ARGS(), "r", &z_fp) == FAILURE) {
+	if (zend_parse_parameters(ZEND_NUM_ARGS(), "r|b", &z_fp, &raw) == FAILURE) {
 		return;
 	}
 
@@ -301,6 +328,10 @@ PHP_FUNCTION(pcap_next)
 	add_assoc_long(&eth_val, "type", __builtin_bswap16(eptr->ether_type));
 	add_assoc_zval(return_value, "ethernet", &eth_val);
 
+	if (raw) {
+		add_assoc_stringl(return_value, "raw", data, (hdr.len-ETHER_HEADER_LEN));
+	}
+
 	if (0x0800 == __builtin_bswap16(eptr->ether_type)) {
 		/* IPv4 */
 		ip = (struct iphdr *) (p+ETHER_HEADER_LEN);
@@ -319,15 +350,20 @@ PHP_FUNCTION(pcap_next)
 		add_assoc_long(&ip_val, "daddr", ntohl(ip->daddr)); 
 		add_assoc_zval(return_value, "ip", &ip_val);
 
-		switch (ip->protocol) {
+		nproto = ip->protocol;
+restart:
+		switch (nproto) {
 			case 6:		/* TCP */
 				pcap_ipv4_tcp(return_value, ip, p);
 				break;
 			case 17:	/* UDP */
 				pcap_ipv4_udp(return_value, ip, p);
 				break;
+			case 51:	/* AH */
+				pcap_ipv4_ah(return_value, ip, p, &extra_hdrlen, &nproto);
+				goto restart;
 			case 112:	/* VRRP */
-				pcap_ipv4_vrrp(return_value, ip, p);
+				pcap_ipv4_vrrp(return_value, ip, p, &extra_hdrlen);
 				break;
 			default:
 				data = (char *)(p+ETHER_HEADER_LEN+(ip->ihl << 2));

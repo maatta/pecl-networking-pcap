@@ -19,6 +19,15 @@ extern zend_module_entry pcap_module_entry;
 #include "TSRM.h"
 #endif
 
+struct ahhdr
+{
+	u_int8_t  next;
+	u_int8_t  len;
+	u_int16_t rsvd;
+	u_int32_t spi;
+	u_int32_t seq;
+};
+
 struct vrrp2hdr
 {
 #if __BYTE_ORDER == __LITTLE_ENDIAN
