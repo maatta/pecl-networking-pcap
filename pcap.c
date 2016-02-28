@@ -133,7 +133,7 @@ PHP_FUNCTION(pcap_geterr)
 {
 	zval	*z_fp;
 	pcap_t	*fp;
-	zend_string	*err;
+	char	*err;
 
 	if (zend_parse_parameters(ZEND_NUM_ARGS(), "r", &z_fp) == FAILURE) {
 		return;
@@ -181,13 +181,13 @@ PHP_FUNCTION(pcap_next_raw)
 }
 /* }}} */
 
-inline void pcap_ipv4_tcp(zval *ret, struct iphdr *ip, const u_char *p)
+inline void pcap_ipv4_tcp(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr)
 {
 	zval	proto_val;
 	char	*data;
 	struct tcphdr	*tcp;
 
-	tcp = (struct tcphdr *) (p+ETHER_HEADER_LEN+(ip->ihl << 2));
+	tcp = (struct tcphdr *) (p+*next_hdr);
 	array_init(&proto_val);
 	add_assoc_long(&proto_val, "sport", ntohs(tcp->th_sport));
 	add_assoc_long(&proto_val, "dport", ntohs(tcp->th_dport));
@@ -203,7 +203,7 @@ inline void pcap_ipv4_tcp(zval *ret, struct iphdr *ip, const u_char *p)
 
 	/* XXX: Options not handled! */
 	if ((ntohs(ip->tot_len) - (ip->ihl << 2) - (tcp->th_off * 4)) > 0) {
-		data = (char *) (p+ETHER_HEADER_LEN+(ip->ihl << 2)+(tcp->th_off * 4));
+		data = (char *) (p+*next_hdr+(tcp->th_off * 4));
 		add_assoc_stringl(ret, "data", data, (ntohs(ip->tot_len)-(ip->ihl << 2)-(tcp->th_off * 4)));
 	} else {
 		/* Set data to false if we have no data */
@@ -213,31 +213,31 @@ inline void pcap_ipv4_tcp(zval *ret, struct iphdr *ip, const u_char *p)
 }
 
 
-inline void pcap_ipv4_udp(zval *ret, struct iphdr *ip, const u_char *p)
+inline void pcap_ipv4_udp(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr)
 {
 	zval	proto_val;
 	char	*data;
 	struct udphdr	*udp;
 
-	udp = (struct udphdr *) (p+ETHER_HEADER_LEN+(ip->ihl << 2));
+	udp = (struct udphdr *) (p+*next_hdr);
 	array_init(&proto_val);
 	add_assoc_long(&proto_val, "sport", ntohs(udp->source));
 	add_assoc_long(&proto_val, "dport", ntohs(udp->dest));
 	add_assoc_long(&proto_val, "len", ntohs(udp->len));
 	add_assoc_long(&proto_val, "checksum", ntohs(udp->check));
 	add_assoc_zval(ret, "udp", &proto_val);
-	data = (char *) (p+ETHER_HEADER_LEN+(ip->ihl << 2)+8);
-	add_assoc_stringl(ret, "data", data, (ntohs(udp->len) - 8));
+	data = (char *) (p+*next_hdr+8);
+	add_assoc_stringl(ret, "data", data, (ntohs(udp->len) - sizeof(struct udphdr)));
 }
 
 
-inline void pcap_ipv4_vrrp(zval *ret, struct iphdr *ip, const u_char *p, int *extra_hdrlen)
+inline void pcap_ipv4_vrrp(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr)
 {
 	zval	proto_val;
 	char	*data;
 	struct	vrrp2hdr	*hdr;
 
-	hdr = (struct vrrp2hdr *) (p+ETHER_HEADER_LEN+(ip->ihl << 2)+*extra_hdrlen);
+	hdr = (struct vrrp2hdr *) (p+*next_hdr);
 
 	if (2 == hdr->version) {
 		/* We could parse all IPs and auth data and add to an array maybe ? */
@@ -251,28 +251,28 @@ inline void pcap_ipv4_vrrp(zval *ret, struct iphdr *ip, const u_char *p, int *ex
 		add_assoc_long(&proto_val, "advert", hdr->advert);
 		add_assoc_long(&proto_val, "checksum", ntohs(hdr->checksum));
 		add_assoc_zval(ret, "vrrp", &proto_val);
-		data = (char *) (p+ETHER_HEADER_LEN+(ip->ihl << 2)+*extra_hdrlen+8);
-		add_assoc_stringl(ret, "data", data, (ntohs(ip->tot_len) - (ip->ihl << 2) - *extra_hdrlen - 8));
+		data = (char *) (p+*next_hdr+sizeof(struct vrrp2hdr));
+		add_assoc_stringl(ret, "data", data, (ntohs(ip->tot_len) - (ip->ihl << 2) - sizeof(struct vrrp2hdr)));
 	} else {
 		/* Not version 2 */
 	}
 }
 
 
-inline void pcap_ipv4_ah(zval *ret, struct iphdr *ip, const u_char *p, int *extra_hdrlen, int *nproto)
+inline void pcap_ipv4_ah(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr, int *nproto)
 {
 	zval	proto_val;
 	char	*data;
 	int	pl_size;
 	struct ahhdr	*ah;
 
-	ah = (struct ahhdr *) (p+ETHER_HEADER_LEN+(ip->ihl << 2)+*extra_hdrlen);
+	ah = (struct ahhdr *) (p+*next_hdr);
 
 	/* Payload size */
 	pl_size = ((ah->len - 2)*12)-sizeof(struct ahhdr);
 	*nproto = ah->next;
-	data = (char *) (p+ETHER_HEADER_LEN+(ip->ihl << 2)+*extra_hdrlen+sizeof(struct ahhdr));
-	*extra_hdrlen = *extra_hdrlen+((ah->len - 2)*12);
+	data = (char *) (p+*next_hdr+sizeof(struct ahhdr));
+	*next_hdr += (ah->len - 2)*12;
 
 	array_init(&proto_val);
 	add_assoc_long(&proto_val, "next", ah->next);
@@ -289,14 +289,15 @@ inline void pcap_ipv4_ah(zval *ret, struct iphdr *ip, const u_char *p, int *extr
    Return a string to confirm that the module is compiled in */
 PHP_FUNCTION(pcap_next)
 {
-	zval	*z_fp, eth_val, ip_val, proto_val;
+	zval	*z_fp, eth_val, ip_val, vlan_val;
 	pcap_t	*fp;
-	int		i, nproto;
-	int		extra_hdrlen = 0;
+	int		i, ip_proto, eth_proto;
+	int		next_hdr = 0;
 	int		raw = 0;
 	char	*data;
 	const u_char	*p;
 	register const struct ether_header	*eptr;
+	struct vlanhdr		*vlan;
 	struct pcap_pkthdr	hdr;
 	struct iphdr		*ip;
 	zend_string *src, *dst;
@@ -325,16 +326,20 @@ PHP_FUNCTION(pcap_next)
 	array_init(return_value);
 	add_assoc_string(&eth_val, "src", ZSTR_VAL(src));
 	add_assoc_string(&eth_val, "dst", ZSTR_VAL(dst));
-	add_assoc_long(&eth_val, "type", __builtin_bswap16(eptr->ether_type));
+	add_assoc_long(&eth_val, "type", ntohs(eptr->ether_type));
 	add_assoc_zval(return_value, "ethernet", &eth_val);
 
 	if (raw) {
 		add_assoc_stringl(return_value, "raw", data, (hdr.len-ETHER_HEADER_LEN));
 	}
 
-	if (0x0800 == __builtin_bswap16(eptr->ether_type)) {
+	eth_proto = ntohs(eptr->ether_type);
+	next_hdr += ETHER_HEADER_LEN;
+
+ethrestart:
+	if (0x0800 == eth_proto) {
 		/* IPv4 */
-		ip = (struct iphdr *) (p+ETHER_HEADER_LEN);
+		ip = (struct iphdr *) (p+next_hdr);
 
 		array_init(&ip_val);
 		add_assoc_long(&ip_val, "version", ip->version);
@@ -350,23 +355,24 @@ PHP_FUNCTION(pcap_next)
 		add_assoc_long(&ip_val, "daddr", ntohl(ip->daddr)); 
 		add_assoc_zval(return_value, "ip", &ip_val);
 
-		nproto = ip->protocol;
+		next_hdr += (ip->ihl << 2);
+		ip_proto = ip->protocol;
 restart:
-		switch (nproto) {
+		switch (ip_proto) {
 			case 6:		/* TCP */
-				pcap_ipv4_tcp(return_value, ip, p);
+				pcap_ipv4_tcp(return_value, ip, p, &next_hdr);
 				break;
 			case 17:	/* UDP */
-				pcap_ipv4_udp(return_value, ip, p);
+				pcap_ipv4_udp(return_value, ip, p, &next_hdr);
 				break;
 			case 51:	/* AH */
-				pcap_ipv4_ah(return_value, ip, p, &extra_hdrlen, &nproto);
+				pcap_ipv4_ah(return_value, ip, p, &next_hdr, &ip_proto);
 				goto restart;
 			case 112:	/* VRRP */
-				pcap_ipv4_vrrp(return_value, ip, p, &extra_hdrlen);
+				pcap_ipv4_vrrp(return_value, ip, p, &next_hdr);
 				break;
 			default:
-				data = (char *)(p+ETHER_HEADER_LEN+(ip->ihl << 2));
+				data = (char *)(p+next_hdr);
 				add_assoc_stringl(return_value, "data", data, (ntohs(ip->tot_len)-(ip->ihl << 2)));
 				break;
 		}
@@ -376,17 +382,30 @@ restart:
 		 *  43 IPv6 Route
 		 *  44 IPv6 Fragment
 		 *  47 GRE
-		 *  51 AH
 		 *  88 EIGRP
 		 *  89 OSPF
 		 * 115 L2TPv3
 		 * 124 ISIS over IPv4
 		 * 137 MPLS-in-IP
 		 */
-/*	} else if (0x86dd == __builtin_bswap16(eptr->ether_type)) { */
+/*	} else if (0x86dd == eth_proto) { */
 		/* IPv6 */
+	} else if (0x8100 == eth_proto) {
+		/* 802.1q */
+		vlan = (struct vlanhdr *) (p+next_hdr);
+		array_init(&vlan_val);
+		add_assoc_long(&vlan_val, "prio", vlan->prio);
+		add_assoc_long(&vlan_val, "cfi", vlan->cfi);
+		add_assoc_long(&vlan_val, "id", (vlan->id>>4));
+		add_assoc_long(&vlan_val, "next", ntohs(vlan->next));
+		add_assoc_zval(return_value, "vlan", &vlan_val);
+		next_hdr += sizeof(struct vlanhdr);
+		eth_proto = ntohs(vlan->next);
+		goto ethrestart;
+	} else if (0x888e == eth_proto) {
+		/* 802.1x */
 	} else {
-		add_assoc_stringl(return_value, "data", data, (hdr.len - ETHER_HEADER_LEN));
+		add_assoc_stringl(return_value, "data", data, (hdr.len - next_hdr));
 	}
 }
 /* }}} */

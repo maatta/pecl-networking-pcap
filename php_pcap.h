@@ -19,6 +19,14 @@ extern zend_module_entry pcap_module_entry;
 #include "TSRM.h"
 #endif
 
+struct vlanhdr
+{
+	u_int8_t  prio:3;
+	u_int8_t  cfi:1;
+	u_int16_t id:12;
+	u_int16_t next;
+};
+
 struct ahhdr
 {
 	u_int8_t  next;
