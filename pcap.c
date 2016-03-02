@@ -285,6 +285,26 @@ inline void pcap_ipv4_ah(zval *ret, struct iphdr *ip, const u_char *p, int *next
 }
 
 
+inline void pcap_ipv4_ospf(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr)
+{
+	zval	proto_val;
+	char	*data;
+	struct ospfhdr	*ospf;
+
+	ospf = (struct ospfhdr *) (p+*next_hdr);
+
+	array_init(&proto_val);
+	add_assoc_long(&proto_val, "version", ospf->version);
+	add_assoc_long(&proto_val, "type", ospf->type);
+	add_assoc_long(&proto_val, "len", ntohs(ospf->len));
+	add_assoc_long(&proto_val, "rtrid", ntohl(ospf->rtrid));
+	add_assoc_long(&proto_val, "area", ntohl(ospf->area));
+	add_assoc_long(&proto_val, "checksum", ntohs(ospf->checksum));
+	add_assoc_long(&proto_val, "autype", ntohs(ospf->autype));
+	add_assoc_long(&proto_val, "auth", ntohl(ospf->auth));
+	add_assoc_zval(ret, "ospf", &proto_val);
+}
+
 /* {{{ proto string confirm_pcap_compiled(string arg)
    Return a string to confirm that the module is compiled in */
 PHP_FUNCTION(pcap_next)
@@ -368,6 +388,9 @@ restart:
 			case 51:	/* AH */
 				pcap_ipv4_ah(return_value, ip, p, &next_hdr, &ip_proto);
 				goto restart;
+			case 89:
+				pcap_ipv4_ospf(return_value, ip, p, &next_hdr);
+				break;
 			case 112:	/* VRRP */
 				pcap_ipv4_vrrp(return_value, ip, p, &next_hdr);
 				break;
