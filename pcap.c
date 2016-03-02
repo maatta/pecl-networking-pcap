@@ -11,8 +11,10 @@
 #include <pcap/pcap.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
+#include <netinet/ip6.h>
 #include <netinet/udp.h>
 #include <netinet/tcp.h>
+#include <arpa/inet.h>
 
 #define ETHER_HEADER_LEN 14
 
@@ -303,6 +305,8 @@ inline void pcap_ipv4_ospf(zval *ret, struct iphdr *ip, const u_char *p, int *ne
 	add_assoc_long(&proto_val, "autype", ntohs(ospf->autype));
 	add_assoc_long(&proto_val, "auth", ntohl(ospf->auth));
 	add_assoc_zval(ret, "ospf", &proto_val);
+	data = (char *) (p+*next_hdr+sizeof(struct ospfhdr));
+	add_assoc_stringl(ret, "data", data, ntohs(ip->tot_len)-(ip->ihl << 2)-sizeof(struct ospfhdr));
 }
 
 /* {{{ proto string confirm_pcap_compiled(string arg)
@@ -411,8 +415,26 @@ restart:
 		 * 124 ISIS over IPv4
 		 * 137 MPLS-in-IP
 		 */
-/*	} else if (0x86dd == eth_proto) { */
+	} else if (0x86dd == eth_proto) { 
 		/* IPv6 */
+		ip6 = (struct ip6_hdr *) (p+next_hdr);
+
+		array_init(&ip_val);
+		add_assoc_long(&ip_val, "flow", ip6->ip6_ctlun.ip6_un1.ip6_un1_flow);
+		add_assoc_long(&ip_val, "plen", ntohs(ip6->ip6_ctlun.ip6_un1.ip6_un1_plen));
+		add_assoc_long(&ip_val, "next", ip6->ip6_ctlun.ip6_un1.ip6_un1_nxt);
+		add_assoc_long(&ip_val, "hlim", ip6->ip6_ctlun.ip6_un1.ip6_un1_hlim);
+		add_assoc_long(&ip_val, "vfc", ip6->ip6_ctlun.ip6_un2_vfc);
+
+		/* Convert IPv6 address to string */
+		inet_ntop(AF_INET6, &(ip6->ip6_src), ip6addr, INET6_ADDRSTRLEN);
+		add_assoc_string(&ip_val, "src", ip6addr);
+		inet_ntop(AF_INET6, &(ip6->ip6_dst), ip6addr, INET6_ADDRSTRLEN);
+		add_assoc_string(&ip_val, "dst", ip6addr);
+
+		add_assoc_zval(return_value, "ip6", &ip_val);
+		data = (char *) (p+next_hdr+sizeof(struct ip6_hdr));
+		add_assoc_stringl(return_value, "data", data, ntohs(ip6->ip6_ctlun.ip6_un1.ip6_un1_plen));
 	} else if (0x8100 == eth_proto) {
 		/* 802.1q */
 		vlan = (struct vlanhdr *) (p+next_hdr);
@@ -427,6 +449,9 @@ restart:
 		goto ethrestart;
 	} else if (0x888e == eth_proto) {
 		/* 802.1x */
+	} else if (0x8847 == eth_proto) {
+		/* MPLS Unicast */
+		goto ethreset;
 	} else {
 		add_assoc_stringl(return_value, "data", data, (hdr.len - next_hdr));
 	}
