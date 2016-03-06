@@ -19,6 +19,17 @@ extern zend_module_entry pcap_module_entry;
 #include "TSRM.h"
 #endif
 
+struct grehdr
+{
+	u_int16_t flags;
+	u_int16_t next;
+};
+
+struct mplshdr
+{
+	u_int32_t label;
+};
+
 struct ospfhdr
 {
 	u_int8_t  version;

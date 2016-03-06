@@ -191,6 +191,7 @@ inline void pcap_ipv4_tcp(zval *ret, struct iphdr *ip, const u_char *p, int *nex
 
 	tcp = (struct tcphdr *) (p+*next_hdr);
 	array_init(&proto_val);
+	add_assoc_string(&proto_val, "header_type", "tcp");
 	add_assoc_long(&proto_val, "sport", ntohs(tcp->th_sport));
 	add_assoc_long(&proto_val, "dport", ntohs(tcp->th_dport));
 	add_assoc_long(&proto_val, "seq", ntohl(tcp->th_seq));
@@ -201,7 +202,7 @@ inline void pcap_ipv4_tcp(zval *ret, struct iphdr *ip, const u_char *p, int *nex
 	add_assoc_long(&proto_val, "window", ntohs(tcp->th_win));
 	add_assoc_long(&proto_val, "checksum", ntohs(tcp->th_sum));
 	add_assoc_long(&proto_val, "urgent", ntohs(tcp->th_urp));
-	add_assoc_zval(ret, "tcp", &proto_val);
+	add_next_index_zval(ret, &proto_val);
 
 	/* XXX: Options not handled! */
 	if ((ntohs(ip->tot_len) - (ip->ihl << 2) - (tcp->th_off * 4)) > 0) {
@@ -223,11 +224,12 @@ inline void pcap_ipv4_udp(zval *ret, struct iphdr *ip, const u_char *p, int *nex
 
 	udp = (struct udphdr *) (p+*next_hdr);
 	array_init(&proto_val);
+	add_assoc_string(&proto_val, "header_type", "udp");
 	add_assoc_long(&proto_val, "sport", ntohs(udp->source));
 	add_assoc_long(&proto_val, "dport", ntohs(udp->dest));
 	add_assoc_long(&proto_val, "len", ntohs(udp->len));
 	add_assoc_long(&proto_val, "checksum", ntohs(udp->check));
-	add_assoc_zval(ret, "udp", &proto_val);
+	add_next_index_zval(ret, &proto_val);
 	data = (char *) (p+*next_hdr+8);
 	add_assoc_stringl(ret, "data", data, (ntohs(udp->len) - sizeof(struct udphdr)));
 }
@@ -244,6 +246,7 @@ inline void pcap_ipv4_vrrp(zval *ret, struct iphdr *ip, const u_char *p, int *ne
 	if (2 == hdr->version) {
 		/* We could parse all IPs and auth data and add to an array maybe ? */
 		array_init(&proto_val);
+		add_assoc_string(&proto_val, "header_type", "vrrp");
 		add_assoc_long(&proto_val, "version", hdr->version);
 		add_assoc_long(&proto_val, "type", hdr->type);
 		add_assoc_long(&proto_val, "rtrid", hdr->rtr_id);
@@ -252,7 +255,7 @@ inline void pcap_ipv4_vrrp(zval *ret, struct iphdr *ip, const u_char *p, int *ne
 		add_assoc_long(&proto_val, "auth", hdr->auth);
 		add_assoc_long(&proto_val, "advert", hdr->advert);
 		add_assoc_long(&proto_val, "checksum", ntohs(hdr->checksum));
-		add_assoc_zval(ret, "vrrp", &proto_val);
+		add_next_index_zval(ret, &proto_val);
 		data = (char *) (p+*next_hdr+sizeof(struct vrrp2hdr));
 		add_assoc_stringl(ret, "data", data, (ntohs(ip->tot_len) - (ip->ihl << 2) - sizeof(struct vrrp2hdr)));
 	} else {
@@ -277,13 +280,14 @@ inline void pcap_ipv4_ah(zval *ret, struct iphdr *ip, const u_char *p, int *next
 	*next_hdr += (ah->len - 2)*12;
 
 	array_init(&proto_val);
+	add_assoc_string(&proto_val, "header_type", "ah");
 	add_assoc_long(&proto_val, "next", ah->next);
 	add_assoc_long(&proto_val, "len", ah->len);
 	add_assoc_long(&proto_val, "rsvd", ntohs(ah->rsvd));
 	add_assoc_long(&proto_val, "spi", ntohl(ah->spi));
 	add_assoc_long(&proto_val, "seq", ntohl(ah->seq));
 	add_assoc_stringl(&proto_val, "icv", data, pl_size);
-	add_assoc_zval(ret, "ah", &proto_val);
+	add_next_index_zval(ret, &proto_val);
 }
 
 
@@ -296,6 +300,7 @@ inline void pcap_ipv4_ospf(zval *ret, struct iphdr *ip, const u_char *p, int *ne
 	ospf = (struct ospfhdr *) (p+*next_hdr);
 
 	array_init(&proto_val);
+	add_assoc_string(&proto_val, "header_type", "ospf");
 	add_assoc_long(&proto_val, "version", ospf->version);
 	add_assoc_long(&proto_val, "type", ospf->type);
 	add_assoc_long(&proto_val, "len", ntohs(ospf->len));
@@ -304,10 +309,35 @@ inline void pcap_ipv4_ospf(zval *ret, struct iphdr *ip, const u_char *p, int *ne
 	add_assoc_long(&proto_val, "checksum", ntohs(ospf->checksum));
 	add_assoc_long(&proto_val, "autype", ntohs(ospf->autype));
 	add_assoc_long(&proto_val, "auth", ntohl(ospf->auth));
-	add_assoc_zval(ret, "ospf", &proto_val);
+	add_next_index_zval(ret, &proto_val);
 	data = (char *) (p+*next_hdr+sizeof(struct ospfhdr));
 	add_assoc_stringl(ret, "data", data, ntohs(ip->tot_len)-(ip->ihl << 2)-sizeof(struct ospfhdr));
 }
+
+
+inline void pcap_ipv4_gre(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr, int *nproto)
+{
+	zval	proto_val;
+	struct grehdr	*gre;
+
+	/* XXX: A few of these might add extra payload to the header. Fix this */
+	gre = (struct grehdr *) (p+*next_hdr);
+	add_assoc_string(&proto_val, "header_type", "gre");
+	add_assoc_long(&proto_val, "csum", ((ntohs(gre->flags) & 0x8000) >> 15));
+	add_assoc_long(&proto_val, "routing", ((ntohs(gre->flags) & 0x4000) >> 14));
+	add_assoc_long(&proto_val, "key", ((ntohs(gre->flags) & 0x2000) >> 13));
+	add_assoc_long(&proto_val, "seq", ((ntohs(gre->flags) & 0x1000) >> 12));
+	add_assoc_long(&proto_val, "ssr", ((ntohs(gre->flags) & 0x0800) >> 11));
+	add_assoc_long(&proto_val, "recursion", ((ntohs(gre->flags) & 0x0700) >> 8));
+	add_assoc_long(&proto_val, "flags", ((ntohs(gre->flags) & 0x00f8) >> 3));
+	add_assoc_long(&proto_val, "version", (ntohs(gre->flags) & 0x0007));
+	add_assoc_long(&proto_val, "next", ntohs(gre->next));
+	add_next_index_zval(ret, &proto_val);
+	*next_hdr += sizeof(struct grehdr);
+	*nproto = gre->next;
+}
+
+
 
 /* {{{ proto string confirm_pcap_compiled(string arg)
    Return a string to confirm that the module is compiled in */
@@ -324,7 +354,10 @@ PHP_FUNCTION(pcap_next)
 	struct vlanhdr		*vlan;
 	struct pcap_pkthdr	hdr;
 	struct iphdr		*ip;
-	zend_string *src, *dst;
+	struct ip6_hdr		*ip6;
+	struct mplshdr		*mpls;
+	zend_string		*src, *dst;
+	unsigned char		ipaddr[INET6_ADDRSTRLEN];
 
 	if (zend_parse_parameters(ZEND_NUM_ARGS(), "r|b", &z_fp, &raw) == FAILURE) {
 		return;
@@ -348,10 +381,11 @@ PHP_FUNCTION(pcap_next)
 
 	array_init(&eth_val);
 	array_init(return_value);
+	add_assoc_string(&eth_val, "header_type", "ethernet");
 	add_assoc_string(&eth_val, "src", ZSTR_VAL(src));
 	add_assoc_string(&eth_val, "dst", ZSTR_VAL(dst));
 	add_assoc_long(&eth_val, "type", ntohs(eptr->ether_type));
-	add_assoc_zval(return_value, "ethernet", &eth_val);
+	add_next_index_zval(return_value, &eth_val);
 
 	if (raw) {
 		add_assoc_stringl(return_value, "raw", data, (hdr.len-ETHER_HEADER_LEN));
@@ -366,6 +400,7 @@ ethrestart:
 		ip = (struct iphdr *) (p+next_hdr);
 
 		array_init(&ip_val);
+		add_assoc_string(&ip_val, "header_type", "ip");
 		add_assoc_long(&ip_val, "version", ip->version);
 		add_assoc_long(&ip_val, "hlen", (ip->ihl << 2));
 		add_assoc_long(&ip_val, "tos", ip->tos);
@@ -375,9 +410,11 @@ ethrestart:
 		add_assoc_long(&ip_val, "ttl", ip->ttl);
 		add_assoc_long(&ip_val, "proto", ip->protocol);
 		add_assoc_long(&ip_val, "checksum", ntohs(ip->check));
-		add_assoc_long(&ip_val, "saddr", ntohl(ip->saddr));
-		add_assoc_long(&ip_val, "daddr", ntohl(ip->daddr)); 
-		add_assoc_zval(return_value, "ip", &ip_val);
+		inet_ntop(AF_INET, &(ip->saddr), ipaddr, INET_ADDRSTRLEN);
+		add_assoc_string(&ip_val, "src", ipaddr);
+		inet_ntop(AF_INET, &(ip->daddr), ipaddr, INET_ADDRSTRLEN);
+		add_assoc_string(&ip_val, "dst", ipaddr); 
+		add_next_index_zval(return_value, &ip_val);
 
 		next_hdr += (ip->ihl << 2);
 		ip_proto = ip->protocol;
@@ -389,10 +426,13 @@ restart:
 			case 17:	/* UDP */
 				pcap_ipv4_udp(return_value, ip, p, &next_hdr);
 				break;
+			case 47:	/* IP GRE */
+				pcap_ipv4_gre(return_value, ip, p, &next_hdr, &ip_proto);
+				goto restart;
 			case 51:	/* AH */
 				pcap_ipv4_ah(return_value, ip, p, &next_hdr, &ip_proto);
 				goto restart;
-			case 89:
+			case 89:	/* OSPF */
 				pcap_ipv4_ospf(return_value, ip, p, &next_hdr);
 				break;
 			case 112:	/* VRRP */
@@ -405,6 +445,7 @@ restart:
 		}
 		/*   1 ICMP
 		 *   2 IGMP
+		 *   4 IPIP
 		 *  41 IPv6
 		 *  43 IPv6 Route
 		 *  44 IPv6 Fragment
@@ -420,6 +461,7 @@ restart:
 		ip6 = (struct ip6_hdr *) (p+next_hdr);
 
 		array_init(&ip_val);
+		add_assoc_string(&ip_val, "header_type", "ip6");
 		add_assoc_long(&ip_val, "flow", ip6->ip6_ctlun.ip6_un1.ip6_un1_flow);
 		add_assoc_long(&ip_val, "plen", ntohs(ip6->ip6_ctlun.ip6_un1.ip6_un1_plen));
 		add_assoc_long(&ip_val, "next", ip6->ip6_ctlun.ip6_un1.ip6_un1_nxt);
@@ -427,23 +469,24 @@ restart:
 		add_assoc_long(&ip_val, "vfc", ip6->ip6_ctlun.ip6_un2_vfc);
 
 		/* Convert IPv6 address to string */
-		inet_ntop(AF_INET6, &(ip6->ip6_src), ip6addr, INET6_ADDRSTRLEN);
-		add_assoc_string(&ip_val, "src", ip6addr);
-		inet_ntop(AF_INET6, &(ip6->ip6_dst), ip6addr, INET6_ADDRSTRLEN);
-		add_assoc_string(&ip_val, "dst", ip6addr);
+		inet_ntop(AF_INET6, &(ip6->ip6_src), ipaddr, INET6_ADDRSTRLEN);
+		add_assoc_string(&ip_val, "src", ipaddr);
+		inet_ntop(AF_INET6, &(ip6->ip6_dst), ipaddr, INET6_ADDRSTRLEN);
+		add_assoc_string(&ip_val, "dst", ipaddr);
 
-		add_assoc_zval(return_value, "ip6", &ip_val);
+		add_next_index_zval(return_value, &ip_val);
 		data = (char *) (p+next_hdr+sizeof(struct ip6_hdr));
 		add_assoc_stringl(return_value, "data", data, ntohs(ip6->ip6_ctlun.ip6_un1.ip6_un1_plen));
 	} else if (0x8100 == eth_proto) {
 		/* 802.1q */
 		vlan = (struct vlanhdr *) (p+next_hdr);
 		array_init(&vlan_val);
+		add_assoc_string(&vlan_val, "header_type", "vlan");
 		add_assoc_long(&vlan_val, "prio", vlan->prio);
 		add_assoc_long(&vlan_val, "cfi", vlan->cfi);
 		add_assoc_long(&vlan_val, "id", (vlan->id>>4));
 		add_assoc_long(&vlan_val, "next", ntohs(vlan->next));
-		add_assoc_zval(return_value, "vlan", &vlan_val);
+		add_next_index_zval(return_value, &vlan_val);
 		next_hdr += sizeof(struct vlanhdr);
 		eth_proto = ntohs(vlan->next);
 		goto ethrestart;
@@ -451,7 +494,27 @@ restart:
 		/* 802.1x */
 	} else if (0x8847 == eth_proto) {
 		/* MPLS Unicast */
-		goto ethreset;
+		do {
+			mpls = (struct mplshdr *) (p+next_hdr);
+			array_init(&vlan_val);
+			add_assoc_string(&vlan_val, "header_type", "mpls");
+			add_assoc_long(&vlan_val, "label", ((ntohl(mpls->label) & 0xFFFFF000) >> 12));
+			add_assoc_long(&vlan_val, "exp", ((ntohl(mpls->label) & 0x00000E00) >> 9));
+			add_assoc_long(&vlan_val, "bottom", ((ntohl(mpls->label) & 0x00000100) >> 8));
+			add_assoc_long(&vlan_val, "ttl", (ntohl(mpls->label) & 0x000000FF)); 
+			add_next_index_zval(return_value, &vlan_val); 
+			next_hdr += sizeof(struct mplshdr);
+		} while (!((ntohl(mpls->label) & 0x00000100) >> 8));
+
+		data = (char *) (p+next_hdr);
+		if ((*data >> 4) == 4) {
+			eth_proto = 0x0800;
+		} else if ((*data >> 4) == 6) {
+			eth_proto = 0x86dd;
+		} else {
+			eth_proto = 0xffee;
+		}
+		goto ethrestart;
 	} else {
 		add_assoc_stringl(return_value, "data", data, (hdr.len - next_hdr));
 	}
