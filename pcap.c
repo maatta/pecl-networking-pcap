@@ -75,6 +75,27 @@ static zend_string *pcap_bin2hex(const unsigned char *old, const size_t oldlen)
 
 /* {{{ proto string confirm_pcap_compiled(string arg)
    Return a string to confirm that the module is compiled in */
+PHP_FUNCTION(pcap_close)
+{
+	zval	*z_fp;
+	pcap_t *fp;
+
+	if (zend_parse_parameters(ZEND_NUM_ARGS(), "r", &z_fp) == FAILURE) {
+		return;
+	}
+
+	if ((fp = (pcap_t *)zend_fetch_resource(Z_RES_P(z_fp), le_pcap_name, le_pcap)) == NULL) {
+		RETURN_FALSE;
+	}
+
+	pcap_close(fp);
+
+	RETURN_TRUE;
+}
+/* }}} */
+
+/* {{{ proto string confirm_pcap_compiled(string arg)
+   Return a string to confirm that the module is compiled in */
 PHP_FUNCTION(pcap_open_offline)
 {
 	char errbuf[PCAP_ERRBUF_SIZE];
@@ -145,7 +166,6 @@ PHP_FUNCTION(pcap_geterr)
 		RETURN_FALSE;
 	}
 
-	/* XXX: This is wrong */
 	err = (char *) pcap_geterr(fp);
 
 	RETURN_STRING(err);
@@ -183,7 +203,7 @@ PHP_FUNCTION(pcap_next_raw)
 }
 /* }}} */
 
-inline void pcap_ipv4_tcp(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr)
+void pcap_ipv4_tcp(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr)
 {
 	zval	proto_val;
 	char	*data;
@@ -216,7 +236,7 @@ inline void pcap_ipv4_tcp(zval *ret, struct iphdr *ip, const u_char *p, int *nex
 }
 
 
-inline void pcap_ipv4_udp(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr)
+void pcap_ipv4_udp(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr)
 {
 	zval	proto_val;
 	char	*data;
@@ -235,7 +255,7 @@ inline void pcap_ipv4_udp(zval *ret, struct iphdr *ip, const u_char *p, int *nex
 }
 
 
-inline void pcap_ipv4_vrrp(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr)
+void pcap_ipv4_vrrp(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr)
 {
 	zval	proto_val;
 	char	*data;
@@ -264,7 +284,7 @@ inline void pcap_ipv4_vrrp(zval *ret, struct iphdr *ip, const u_char *p, int *ne
 }
 
 
-inline void pcap_ipv4_ah(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr, int *nproto)
+void pcap_ipv4_ah(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr, int *nproto)
 {
 	zval	proto_val;
 	char	*data;
@@ -291,7 +311,7 @@ inline void pcap_ipv4_ah(zval *ret, struct iphdr *ip, const u_char *p, int *next
 }
 
 
-inline void pcap_ipv4_ospf(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr)
+void pcap_ipv4_ospf(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr)
 {
 	zval	proto_val;
 	char	*data;
@@ -315,14 +335,15 @@ inline void pcap_ipv4_ospf(zval *ret, struct iphdr *ip, const u_char *p, int *ne
 }
 
 
-inline void pcap_ipv4_gre(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr, int *nproto)
+void pcap_ipv4_gre(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr, int *nproto)
 {
 	zval	proto_val;
 	struct grehdr	*gre;
 
 	/* XXX: A few of these might add extra payload to the header. Fix this */
 	gre = (struct grehdr *) (p+*next_hdr);
-	add_assoc_string(&proto_val, "header_type", "gre");
+	array_init(&proto_val);
+	add_assoc_string(&proto_val, "header_type", "gre"); 
 	add_assoc_long(&proto_val, "csum", ((ntohs(gre->flags) & 0x8000) >> 15));
 	add_assoc_long(&proto_val, "routing", ((ntohs(gre->flags) & 0x4000) >> 14));
 	add_assoc_long(&proto_val, "key", ((ntohs(gre->flags) & 0x2000) >> 13));
@@ -428,7 +449,7 @@ restart:
 				break;
 			case 47:	/* IP GRE */
 				pcap_ipv4_gre(return_value, ip, p, &next_hdr, &ip_proto);
-				goto restart;
+				goto ethrestart;
 			case 51:	/* AH */
 				pcap_ipv4_ah(return_value, ip, p, &next_hdr, &ip_proto);
 				goto restart;
@@ -596,6 +617,7 @@ PHP_MINFO_FUNCTION(pcap)
  * Every user visible function must have an entry in pcap_functions[].
  */
 const zend_function_entry pcap_functions[] = {
+	PHP_FE(pcap_close,			NULL)
 	PHP_FE(pcap_open_offline,	NULL)
 	PHP_FE(pcap_filter,			NULL)
 	PHP_FE(pcap_geterr,			NULL)
@@ -612,7 +634,7 @@ zend_module_entry pcap_module_entry = {
 	"pcap",
 	pcap_functions,
 	PHP_MINIT(pcap),
-	PHP_MSHUTDOWN(pcap),
+	/*PHP_MSHUTDOWN(pcap)*/ NULL,
 	/*PHP_RINIT(pcap)*/ NULL,		/* Replace with NULL if there's nothing to do at request start */
 	/*PHP_RSHUTDOWN(pcap)*/ NULL,	/* Replace with NULL if there's nothing to do at request end */
 	PHP_MINFO(pcap),
