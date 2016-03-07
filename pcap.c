@@ -257,15 +257,17 @@ void pcap_ipv4_udp(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr)
 
 void pcap_ipv4_vrrp(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr)
 {
-	zval	proto_val;
+	zval	proto_val, ips;
 	char	*data;
 	struct	vrrp2hdr	*hdr;
+	int	i;
+	unsigned char	ipaddr[INET_ADDRSTRLEN];
 
 	hdr = (struct vrrp2hdr *) (p+*next_hdr);
 
 	if (2 == hdr->version) {
-		/* We could parse all IPs and auth data and add to an array maybe ? */
 		array_init(&proto_val);
+		array_init(&ips);
 		add_assoc_string(&proto_val, "header_type", "vrrp");
 		add_assoc_long(&proto_val, "version", hdr->version);
 		add_assoc_long(&proto_val, "type", hdr->type);
@@ -275,9 +277,18 @@ void pcap_ipv4_vrrp(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr)
 		add_assoc_long(&proto_val, "auth", hdr->auth);
 		add_assoc_long(&proto_val, "advert", hdr->advert);
 		add_assoc_long(&proto_val, "checksum", ntohs(hdr->checksum));
-		add_next_index_zval(ret, &proto_val);
+
+		for (i = 0; i < hdr->count; i++) {
+			data = (char *) (p+*next_hdr+sizeof(struct vrrp2hdr));
+			inet_ntop(AF_INET, data, ipaddr, INET_ADDRSTRLEN);
+			add_next_index_string(&ips, ipaddr);
+			*next_hdr += 4;
+		}
+
+		add_assoc_zval(&proto_val, "ip", &ips);
 		data = (char *) (p+*next_hdr+sizeof(struct vrrp2hdr));
-		add_assoc_stringl(ret, "data", data, (ntohs(ip->tot_len) - (ip->ihl << 2) - sizeof(struct vrrp2hdr)));
+		add_assoc_stringl(&proto_val, "authdata", data, 8);
+		add_next_index_zval(ret, &proto_val);
 	} else {
 		/* Not version 2 */
 	}
