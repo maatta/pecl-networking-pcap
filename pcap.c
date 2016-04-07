@@ -72,6 +72,7 @@ static zend_string *pcap_bin2hex(const unsigned char *old, const size_t oldlen)
 
 	return result;
 }
+/* }}} */
 
 /* {{{ proto string confirm_pcap_compiled(string arg)
    Return a string to confirm that the module is compiled in */
@@ -338,8 +339,11 @@ void pcap_ipv4_ospf(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr)
 	add_assoc_long(&proto_val, "rtrid", ntohl(ospf->rtrid));
 	add_assoc_long(&proto_val, "area", ntohl(ospf->area));
 	add_assoc_long(&proto_val, "checksum", ntohs(ospf->checksum));
-	add_assoc_long(&proto_val, "autype", ntohs(ospf->autype));
-	add_assoc_long(&proto_val, "auth", ntohl(ospf->auth));
+	add_assoc_long(&proto_val, "authtype", ntohs(ospf->authtype));
+	add_assoc_long(&proto_val, "authrsrvd", ntohs(ospf->authrsrvd));
+	add_assoc_long(&proto_val, "authkey", ospf->authkey);
+	add_assoc_long(&proto_val, "authlen", ospf->authlen);
+	add_assoc_long(&proto_val, "authseq", ntohl(ospf->authseq));
 	add_next_index_zval(ret, &proto_val);
 	data = (char *) (p+*next_hdr+sizeof(struct ospfhdr));
 	add_assoc_stringl(ret, "data", data, ntohs(ip->tot_len)-(ip->ihl << 2)-sizeof(struct ospfhdr));
@@ -481,9 +485,7 @@ restart:
 		 *  41 IPv6
 		 *  43 IPv6 Route
 		 *  44 IPv6 Fragment
-		 *  47 GRE
 		 *  88 EIGRP
-		 *  89 OSPF
 		 * 115 L2TPv3
 		 * 124 ISIS over IPv4
 		 * 137 MPLS-in-IP

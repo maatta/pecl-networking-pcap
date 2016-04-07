@@ -19,6 +19,17 @@ extern zend_module_entry pcap_module_entry;
 #include "TSRM.h"
 #endif
 
+struct eigrphdr
+{
+	u_int8_t  version;
+	u_int8_t  opcode;
+	u_int16_t csum;
+	u_int32_t flags;
+	u_int32_t seq;
+	u_int32_t ack;
+	u_int32_t as;
+};
+
 struct grehdr
 {
 	u_int16_t flags;
@@ -38,8 +49,11 @@ struct ospfhdr
 	u_int32_t rtrid;
 	u_int32_t area;
 	u_int16_t checksum;
-	u_int16_t autype;
-	u_int64_t auth;
+	u_int16_t authtype;
+	u_int16_t authrsrvd;
+	u_int8_t  authkey;
+	u_int8_t  authlen;
+	u_int16_t authseq;
 };
 
 struct vlanhdr
