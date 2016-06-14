@@ -14,6 +14,7 @@
 #include <netinet/ip6.h>
 #include <netinet/udp.h>
 #include <netinet/tcp.h>
+#include <netinet/ip_icmp.h>
 #include <arpa/inet.h>
 
 #define ETHER_HEADER_LEN 14
@@ -256,6 +257,23 @@ void pcap_ipv4_udp(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr)
 }
 
 
+void pcap_ipv4_icmp(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr)
+{
+	zval	proto_val;
+	char	*data;
+	struct icmp	*icmp;
+
+	icmp = (struct icmp *) (p+*next_hdr);
+	array_init(&proto_val);
+	add_assoc_string(&proto_val, "header_type", "icmp");
+	add_assoc_long(&proto_val, "type", ntohs(icmp->icmp_type));
+	add_assoc_long(&proto_val, "code", ntohs(icmp->icmp_code));
+	add_assoc_long(&proto_val, "checksum", ntohs(icmp->icmp_cksum));
+	add_next_index_zval(ret, &proto_val);
+	data = (char *) (p+*next_hdr+4);
+	add_assoc_stringl(ret, "data", data, (ntohs(ip->tot_len)-(ip->ihl << 2)-4));
+}
+
 void pcap_ipv4_vrrp(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr)
 {
 	zval	proto_val, ips;
@@ -456,6 +474,9 @@ ethrestart:
 		ip_proto = ip->protocol;
 restart:
 		switch (ip_proto) {
+			case 1:		/* ICMP */
+				pcap_ipv4_icmp(return_value, ip, p, &next_hdr);
+				break;
 			case 6:		/* TCP */
 				pcap_ipv4_tcp(return_value, ip, p, &next_hdr);
 				break;
@@ -479,8 +500,7 @@ restart:
 				add_assoc_stringl(return_value, "data", data, (ntohs(ip->tot_len)-(ip->ihl << 2)));
 				break;
 		}
-		/*   1 ICMP
-		 *   2 IGMP
+		/*   2 IGMP
 		 *   4 IPIP
 		 *  41 IPv6
 		 *  43 IPv6 Route
