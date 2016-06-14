@@ -361,9 +361,33 @@ void pcap_ipv4_ospf(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr)
 	add_assoc_long(&proto_val, "authrsrvd", ntohs(ospf->authrsrvd));
 	add_assoc_long(&proto_val, "authkey", ospf->authkey);
 	add_assoc_long(&proto_val, "authlen", ospf->authlen);
-	add_assoc_long(&proto_val, "authseq", ntohl(ospf->authseq));
+	add_assoc_long(&proto_val, "authseq", ntohl(ospf->authseq)); /* XXX: should be ntohs? */
 	add_next_index_zval(ret, &proto_val);
+
 	data = (char *) (p+*next_hdr+sizeof(struct ospfhdr));
+	add_assoc_stringl(ret, "data", data, ntohs(ip->tot_len)-(ip->ihl << 2)-sizeof(struct ospfhdr));
+}
+
+
+void pcap_ipv4_eigrp(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr)
+{
+	zval	proto_val;
+	char	*data;
+	struct eigrphdr		*eigrp;
+
+	eigrp = (struct eigrphdr *) (p+*next_hdr);
+
+	array_init(&proto_val);
+	add_assoc_long(&proto_val, "version", ntohs(eigrp->version));
+	add_assoc_long(&proto_val, "opcode", ntohs(eigrp->opcode));
+	add_assoc_long(&proto_val, "checksum", ntohs(eigrp->csum));
+	add_assoc_long(&proto_val, "flags", ntohl(eigrp->flags));
+	add_assoc_long(&proto_val, "seq", ntohl(eigrp->seq));
+	add_assoc_long(&proto_val, "ack", ntohl(eigrp->ack));
+	add_assoc_long(&proto_val, "as", ntohl(eigrp->as));
+	add_next_index_zval(ret, &proto_val);
+
+	data = (char *) (p+*next_hdr+sizeof(struct eigrphdr));
 	add_assoc_stringl(ret, "data", data, ntohs(ip->tot_len)-(ip->ihl << 2)-sizeof(struct ospfhdr));
 }
 
@@ -489,6 +513,9 @@ restart:
 			case 51:	/* AH */
 				pcap_ipv4_ah(return_value, ip, p, &next_hdr, &ip_proto);
 				goto restart;
+			case 88:	/* EIGRP */
+				pcap_ipv4_eigrp(return_value, ip, p, &next_hdr);
+				break;
 			case 89:	/* OSPF */
 				pcap_ipv4_ospf(return_value, ip, p, &next_hdr);
 				break;
@@ -505,7 +532,6 @@ restart:
 		 *  41 IPv6
 		 *  43 IPv6 Route
 		 *  44 IPv6 Fragment
-		 *  88 EIGRP
 		 * 115 L2TPv3
 		 * 124 ISIS over IPv4
 		 * 137 MPLS-in-IP
