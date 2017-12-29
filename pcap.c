@@ -75,7 +75,7 @@ static zend_string *pcap_bin2hex(const unsigned char *old, const size_t oldlen)
 }
 /* }}} */
 
-/* {{{ proto string confirm_pcap_compiled(string arg)
+/* {{{ proto bool pcap_close(resource arg)
    Return a string to confirm that the module is compiled in */
 PHP_FUNCTION(pcap_close)
 {
@@ -96,7 +96,7 @@ PHP_FUNCTION(pcap_close)
 }
 /* }}} */
 
-/* {{{ proto string confirm_pcap_compiled(string arg)
+/* {{{ proto resource pcap_open_offline(string file)
    Return a string to confirm that the module is compiled in */
 PHP_FUNCTION(pcap_open_offline)
 {
@@ -120,7 +120,7 @@ PHP_FUNCTION(pcap_open_offline)
 }
 /* }}} */
 
-/* {{{ proto string confirm_pcap_compiled(string arg)
+/* {{{ proto string pcap_filter(resource pcap, string filter)
    Return a string to confirm that the module is compiled in */
 PHP_FUNCTION(pcap_filter)
 {
@@ -152,7 +152,7 @@ PHP_FUNCTION(pcap_filter)
 /* }}} */
 
 
-/* {{{ proto string confirm_pcap_compiled(string arg)
+/* {{{ proto string pcap_geterr(resource arg)
    Return a string to confirm that the module is compiled in */
 PHP_FUNCTION(pcap_geterr)
 {
@@ -175,7 +175,7 @@ PHP_FUNCTION(pcap_geterr)
 /* }}} */
 
 
-/* {{{ proto string confirm_pcap_compiled(string arg)
+/* {{{ proto string pcap_next_raw(resource pcap)
    Return a string to confirm that the module is compiled in */
 PHP_FUNCTION(pcap_next_raw)
 {
@@ -417,7 +417,7 @@ void pcap_ipv4_gre(zval *ret, struct iphdr *ip, const u_char *p, int *next_hdr, 
 
 
 
-/* {{{ proto string confirm_pcap_compiled(string arg)
+/* {{{ proto array pcap_next(resource pcap)
    Return a string to confirm that the module is compiled in */
 PHP_FUNCTION(pcap_next)
 {
